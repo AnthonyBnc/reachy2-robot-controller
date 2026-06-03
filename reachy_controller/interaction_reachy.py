@@ -1,17 +1,43 @@
 from reachy2_sdk import ReachySDK
 from reachy2_sdk.media.camera import CameraView
+
+import pyttsx3
 import cv2
 import time
+import threading
 
 ROBOT_HOST = "10.116.19.109"
 
 reachy = ReachySDK(host=ROBOT_HOST)
+
 print("Connected:", reachy.is_connected())
 
 if not reachy.is_connected():
     raise Exception("Cannot connect to Reachy")
 
 reachy.turn_on()
+
+# Text-to-speech setup
+speaker = pyttsx3.init()
+speaker.setProperty("rate", 160)
+speaker.setProperty("volume", 1.0)
+
+
+def say(text):
+    print("Reachy says:", text)
+    speaker.say(text)
+    speaker.runAndWait()
+
+
+def say_async(text):
+    """
+    Speak while Reachy is moving.
+    This prevents the robot from waiting until the speech is finished.
+    """
+    thread = threading.Thread(target=say, args=(text,))
+    thread.daemon = True
+    thread.start()
+
 
 # Load OpenCV face detector
 face_detector = cv2.CascadeClassifier(
@@ -53,32 +79,55 @@ def look_at_face(face, frame_width, frame_height):
 def wave_right_hand():
     print("Waving...")
 
+    # Voice starts at the same time as the waving gesture
+    say_async("Hello, I am Reachy. Nice to meet you.")
+
     current = reachy.r_arm.get_current_positions()
     home = current.copy()
 
     raised = current.copy()
+
+    # Joint order:
+    # 0 = shoulder pitch
+    # 1 = shoulder roll
+    # 2 = elbow yaw
+    # 3 = elbow pitch
+    # 4 = wrist roll
+    # 5 = wrist pitch
+    # 6 = wrist yaw
+
     raised[0] = current[0] - 15   # shoulder pitch
     raised[1] = current[1] + 18   # shoulder roll
-    raised[3] = current[3] - 18   # elbow pitch
+    raised[2] = current[2] + 8    # elbow yaw
+    raised[3] = current[3] - 25   # elbow pitch
 
-    reachy.r_arm.goto(raised, duration=2.0, wait=True)
+    reachy.r_arm.goto(raised, duration=2.5, wait=True)
 
     try:
         reachy.r_arm.gripper.set_opening(100)
     except Exception:
         pass
 
-    left = raised.copy()
-    right = raised.copy()
+    wave_left = raised.copy()
+    wave_right = raised.copy()
 
-    left[6] = raised[6] + 15
-    right[6] = raised[6] - 15
+    # Elbow + wrist movement while waving
+    wave_left[2] = raised[2] + 10
+    wave_left[3] = raised[3] - 15
+    wave_left[6] = raised[6] + 15
 
-    reachy.r_arm.goto(left, duration=1.0, wait=True)
-    reachy.r_arm.goto(right, duration=1.0, wait=True)
-    reachy.r_arm.goto(left, duration=1.0, wait=True)
+    wave_right[2] = raised[2] - 10
+    wave_right[3] = raised[3] - 15
+    wave_right[6] = raised[6] - 15
 
-    reachy.r_arm.goto(home, duration=2.0, wait=True)
+    reachy.r_arm.goto(wave_left, duration=1.0, wait=True)
+    reachy.r_arm.goto(wave_right, duration=1.0, wait=True)
+    reachy.r_arm.goto(wave_left, duration=1.0, wait=True)
+    reachy.r_arm.goto(wave_right, duration=1.0, wait=True)
+
+    # Return to raised pose first, then home
+    reachy.r_arm.goto(raised, duration=1.0, wait=True)
+    reachy.r_arm.goto(home, duration=2.5, wait=True)
 
 
 print("Starting simple face interaction.")
@@ -101,11 +150,18 @@ while True:
     frame_height, frame_width = frame_bgr.shape[:2]
 
     if len(faces) > 0:
-        # choose biggest face only
+        # Choose biggest face only
         face = max(faces, key=lambda f: f[2] * f[3])
+
         x, y, w, h = face
 
-        cv2.rectangle(frame_bgr, (x, y), (x + w, y + h), (0, 255, 0), 2)
+        cv2.rectangle(
+            frame_bgr,
+            (x, y),
+            (x + w, y + h),
+            (0, 255, 0),
+            2
+        )
 
         now = time.time()
 
