@@ -6,6 +6,7 @@ import cv2
 import time
 import threading
 
+
 ROBOT_HOST = "10.116.19.109"
 
 reachy = ReachySDK(host=ROBOT_HOST)
@@ -17,7 +18,11 @@ if not reachy.is_connected():
 
 reachy.turn_on()
 
+
+# -----------------------------
 # Text-to-speech setup
+# -----------------------------
+
 speaker = pyttsx3.init()
 speaker.setProperty("rate", 160)
 speaker.setProperty("volume", 1.0)
@@ -39,7 +44,10 @@ def say_async(text):
     thread.start()
 
 
-# Load OpenCV face detector
+# -----------------------------
+# OpenCV face detector
+# -----------------------------
+
 face_detector = cv2.CascadeClassifier(
     cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
 )
@@ -47,6 +55,10 @@ face_detector = cv2.CascadeClassifier(
 last_wave_time = 0
 last_head_move_time = 0
 
+
+# -----------------------------
+# Head tracking
+# -----------------------------
 
 def look_at_face(face, frame_width, frame_height):
     x, y, w, h = face
@@ -58,7 +70,7 @@ def look_at_face(face, frame_width, frame_height):
     offset_x = (face_x - frame_width / 2) / (frame_width / 2)
     offset_y = (face_y - frame_height / 2) / (frame_height / 2)
 
-    # If face is near center, don't move head
+    # If face is near center, do not move head
     if abs(offset_x) < 0.18 and abs(offset_y) < 0.18:
         return True
 
@@ -70,11 +82,15 @@ def look_at_face(face, frame_width, frame_height):
         x=0.5,
         y=target_y,
         z=target_z,
-        duration=1.2
+        duration=1.2,
     )
 
     return False
 
+
+# -----------------------------
+# Right hand wave with wrist roll
+# -----------------------------
 
 def wave_right_hand():
     print("Waving...")
@@ -99,36 +115,58 @@ def wave_right_hand():
     raised[0] = current[0] - 15   # shoulder pitch
     raised[1] = current[1] + 18   # shoulder roll
     raised[2] = current[2] + 8    # elbow yaw
-    raised[3] = current[3] - 25   # elbow pitch
+
+    # Safer than -80. If you already tested -80 safely, you can change this back.
+    raised[3] = current[3] - 40   # elbow pitch
+
+    # NEW: wrist roll setup before waving
+    raised[4] = current[4] + 10   # wrist roll
 
     reachy.r_arm.goto(raised, duration=2.5, wait=True)
 
     try:
         reachy.r_arm.gripper.set_opening(100)
-    except Exception:
-        pass
+    except Exception as e:
+        print("Could not open gripper:", e)
 
     wave_left = raised.copy()
     wave_right = raised.copy()
 
-    # Elbow + wrist movement while waving
-    wave_left[2] = raised[2] + 10
-    wave_left[3] = raised[3] - 15
-    wave_left[6] = raised[6] + 15
+    # Wave left movement
+    wave_left[2] = raised[2] + 10     # elbow yaw
+    wave_left[3] = raised[3] - 10     # elbow pitch
+    wave_left[4] = raised[4] + 20     # NEW: wrist roll
+    wave_left[6] = raised[6] + 15     # wrist yaw
 
-    wave_right[2] = raised[2] - 10
-    wave_right[3] = raised[3] - 15
-    wave_right[6] = raised[6] - 15
+    # Wave right movement
+    wave_right[2] = raised[2] - 10    # elbow yaw
+    wave_right[3] = raised[3] - 10    # elbow pitch
+    wave_right[4] = raised[4] - 20    # NEW: wrist roll
+    wave_right[6] = raised[6] - 15    # wrist yaw
 
     reachy.r_arm.goto(wave_left, duration=1.0, wait=True)
     reachy.r_arm.goto(wave_right, duration=1.0, wait=True)
     reachy.r_arm.goto(wave_left, duration=1.0, wait=True)
     reachy.r_arm.goto(wave_right, duration=1.0, wait=True)
 
-    # Return to raised pose first, then home
+    # Return to raised pose first
     reachy.r_arm.goto(raised, duration=1.0, wait=True)
+
+    # Relax hand
+    try:
+        reachy.r_arm.gripper.set_opening(60)
+    except Exception as e:
+        print("Could not relax gripper:", e)
+
+    # Return to home pose
     reachy.r_arm.goto(home, duration=2.5, wait=True)
 
+    print("Wave complete.")
+
+
+# -----------------------------
+# Main face interaction loop
+# -----------------------------
 
 print("Starting simple face interaction.")
 print("Press Q to quit.")
@@ -144,7 +182,7 @@ while True:
         gray,
         scaleFactor=1.2,
         minNeighbors=5,
-        minSize=(70, 70)
+        minSize=(70, 70),
     )
 
     frame_height, frame_width = frame_bgr.shape[:2]
@@ -152,7 +190,6 @@ while True:
     if len(faces) > 0:
         # Choose biggest face only
         face = max(faces, key=lambda f: f[2] * f[3])
-
         x, y, w, h = face
 
         cv2.rectangle(
@@ -160,7 +197,7 @@ while True:
             (x, y),
             (x + w, y + h),
             (0, 255, 0),
-            2
+            2,
         )
 
         now = time.time()
@@ -182,7 +219,7 @@ while True:
             cv2.FONT_HERSHEY_SIMPLEX,
             1,
             (0, 255, 0),
-            2
+            2,
         )
 
     else:
@@ -193,7 +230,7 @@ while True:
             cv2.FONT_HERSHEY_SIMPLEX,
             1,
             (0, 0, 255),
-            2
+            2,
         )
 
     cv2.imshow("Reachy Simple Face Interaction", frame_bgr)
