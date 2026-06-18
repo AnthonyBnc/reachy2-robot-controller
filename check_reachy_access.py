@@ -1,7 +1,7 @@
 from reachy2_sdk import ReachySDK
 import time
 
-ROBOT_HOST = "YOUR_IP"  # change if Reachy's IP changes
+ROBOT_HOST = "10.116.19.109" 
 
 
 def print_section(title):
