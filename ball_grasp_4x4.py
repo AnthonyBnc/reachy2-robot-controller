@@ -1,11 +1,14 @@
 import time
 import numpy as np
-
 from reachy2_sdk import ReachySDK
 
 
 ROBOT_HOST = "10.116.19.109"
 
+
+# ---------------------------------------------------------
+# Helper functions
+# ---------------------------------------------------------
 
 def print_matrix(name, matrix):
     print(f"\n{name}:")
@@ -13,8 +16,7 @@ def print_matrix(name, matrix):
 
 
 def validate_pose_matrix(pose):
-    if not isinstance(pose, np.ndarray):
-        raise TypeError("Pose must be a NumPy array.")
+    pose = np.array(pose, dtype=np.float64)
 
     if pose.shape != (4, 4):
         raise ValueError("Pose must be a 4x4 matrix.")
@@ -25,33 +27,45 @@ def validate_pose_matrix(pose):
     if not np.allclose(pose[3, :], [0, 0, 0, 1]):
         raise ValueError("Last row must be [0, 0, 0, 1].")
 
+    return pose
+
 
 def move_4x4(arm, pose, duration=2.0):
-    validate_pose_matrix(pose)
+    """
+    Move Reachy right arm using 4x4 matrix.
 
-    print_matrix("Moving to pose", pose)
+    Important:
+    This version is compatible with reachy2-sdk==1.0.7.
+    Do not use interpolation_space or interpolation_mode.
+    """
+
+    pose = validate_pose_matrix(pose)
+
+    print_matrix("Moving to 4x4 pose", pose)
 
     arm.goto(
         pose,
         duration=duration,
-        wait=True,
-        interpolation_space="cartesian_space",
-        interpolation_mode="minimum_jerk"
+        wait=True
     )
 
 
 def translate_pose_robot_frame(base_pose, dx=0.0, dy=0.0, dz=0.0):
     """
-    Move pose in robot/world coordinate frame.
+    Translate a 4x4 pose in robot/world frame.
 
-    dx positive = forward
-    dy positive = left
-    dy negative = right
-    dz positive = up
-    dz negative = down
+    Approximate meaning:
+        dx positive = forward
+        dx negative = backward
+
+        dy positive = robot left
+        dy negative = robot right
+
+        dz positive = up
+        dz negative = down
     """
 
-    new_pose = base_pose.copy()
+    new_pose = np.array(base_pose, dtype=np.float64).copy()
 
     new_pose[0, 3] += dx
     new_pose[1, 3] += dy
@@ -62,73 +76,97 @@ def translate_pose_robot_frame(base_pose, dx=0.0, dy=0.0, dz=0.0):
 
 def open_gripper(arm):
     if arm.gripper is None:
-        raise RuntimeError("Right arm has no gripper.")
+        raise RuntimeError("Right gripper is not available.")
 
-    print("Opening gripper...")
-    arm.gripper.set_opening(100.0)
+    print("Opening right gripper...")
+    arm.gripper.set_opening(100)
     time.sleep(0.8)
 
 
 def close_gripper_for_ball(arm):
     if arm.gripper is None:
-        raise RuntimeError("Right arm has no gripper.")
+        raise RuntimeError("Right gripper is not available.")
 
-    print("Closing gripper around ball...")
+    print("Closing gripper for ball...")
 
-    # Tune this based on ball size.
+    # Tune this depending on ball size.
     # 100 = fully open
     # 0 = fully closed
-    arm.gripper.set_opening(25.0)
+    arm.gripper.set_opening(25)
 
     time.sleep(1.0)
 
 
+def safe_stop_message():
+    print()
+    print("Safety reminder:")
+    print("- Keep E-stop nearby.")
+    print("- Make sure the arm has free space.")
+    print("- Start with very small dx/dy/dz values.")
+    print("- Do not use mobile base.")
+
+
+# ---------------------------------------------------------
+# Main program
+# ---------------------------------------------------------
+
 def main():
+    safe_stop_message()
+
     reachy = ReachySDK(host=ROBOT_HOST)
+
+    print("Connected:", reachy.is_connected())
 
     if not reachy.is_connected():
         raise RuntimeError("Cannot connect to Reachy.")
-
-    print("Connected to Reachy.")
 
     reachy.turn_on()
 
     arm = reachy.r_arm
 
     if arm is None:
-        raise RuntimeError("Right arm not available.")
+        raise RuntimeError("Right arm is not available.")
 
     if arm.gripper is None:
-        raise RuntimeError("Right gripper not available.")
+        raise RuntimeError("Right gripper is not available.")
 
-    # --------------------------------------------------
-    # IMPORTANT:
-    # At this point, you should already have moved Reachy
-    # to the 90-degree default pose using the dashboard.
-    # --------------------------------------------------
+    print()
+    print("Before continuing:")
+    print("1. Use the dashboard to move Reachy's right arm to the 90-degree default pose.")
+    print("2. Place the ball in front of the right hand.")
+    print("3. Make sure the arm path is clear.")
+    print()
 
-    input("Move Reachy right arm to 90-degree pose in dashboard, then press Enter... ")
+    input("When ready, press Enter... ")
 
-    # Read current 4x4 pose from the dashboard-set position
+    # -----------------------------------------------------
+    # 1. Read current dashboard-set 4x4 pose
+    # -----------------------------------------------------
+
     base_pose = arm.forward_kinematics()
     base_pose = np.array(base_pose, dtype=np.float64)
 
-    print_matrix("Base 90-degree 4x4 pose", base_pose)
+    print_matrix("BASE_POSE from dashboard 90-degree position", base_pose)
 
-    # --------------------------------------------------
-    # Build grasp poses using 4x4 matrix offsets
-    # --------------------------------------------------
+    # -----------------------------------------------------
+    # 2. Create relative 4x4 poses
+    # -----------------------------------------------------
+    # Start small.
+    # If the hand does not reach the ball, slowly increase dx.
+    # If the hand is too high/low, adjust dz.
+    # If the hand is too left/right, adjust dy.
+    # -----------------------------------------------------
 
     pre_grasp_pose = translate_pose_robot_frame(
         base_pose,
-        dx=0.06,
+        dx=0.04,
         dy=0.00,
-        dz=-0.02
+        dz=0.00
     )
 
     grasp_pose = translate_pose_robot_frame(
         pre_grasp_pose,
-        dx=0.06,
+        dx=0.04,
         dy=0.00,
         dz=0.00
     )
@@ -137,42 +175,45 @@ def main():
         grasp_pose,
         dx=0.00,
         dy=0.00,
-        dz=0.12
+        dz=0.10
     )
 
-    handover_pose = translate_pose_robot_frame(
-        lift_pose,
-        dx=0.05,
-        dy=0.08,
-        dz=0.02
-    )
+    return_pose = base_pose.copy()
 
     print_matrix("PRE_GRASP_POSE", pre_grasp_pose)
     print_matrix("GRASP_POSE", grasp_pose)
     print_matrix("LIFT_POSE", lift_pose)
-    print_matrix("HANDOVER_POSE", handover_pose)
+    print_matrix("RETURN_POSE", return_pose)
 
-    # --------------------------------------------------
-    # Execute grasp
-    # --------------------------------------------------
+    confirm = input("Run movement? Type yes to continue: ")
+
+    if confirm.lower().strip() != "yes":
+        print("Cancelled before movement.")
+        return
+
+    # -----------------------------------------------------
+    # 3. Execute ball grasp sequence
+    # -----------------------------------------------------
 
     open_gripper(arm)
 
     print("Moving to pre-grasp pose...")
-    move_4x4(arm, pre_grasp_pose, duration=2.0)
+    move_4x4(arm, pre_grasp_pose, duration=2.5)
 
     print("Moving to grasp pose...")
-    move_4x4(arm, grasp_pose, duration=1.5)
+    move_4x4(arm, grasp_pose, duration=2.0)
 
     close_gripper_for_ball(arm)
 
     print("Lifting ball...")
-    move_4x4(arm, lift_pose, duration=1.5)
+    move_4x4(arm, lift_pose, duration=2.0)
 
-    print("Moving to handover pose...")
-    move_4x4(arm, handover_pose, duration=2.0)
+    input("Press Enter to return to base pose... ")
 
-    print("Ball grasp sequence complete.")
+    print("Returning to base pose...")
+    move_4x4(arm, return_pose, duration=2.5)
+
+    print("Done.")
 
 
 if __name__ == "__main__":
