@@ -1,5 +1,6 @@
 reachy2-sdk==1.0.7
 reachy2-sdk-api==1.0.11
+openai
 opencv-python
 numpy
 pillow
