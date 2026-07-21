@@ -44,13 +44,15 @@ def create_ai_client():
         },
     )
 
-def add_user_message(history, text):
-    history.append(
+
+def create_conversation_history():
+    return [
         {
-            "role": "user",
-            "content": text,
+            "role": "system",
+            "content": DEAKIN_SYSTEM_PROMPT,
         }
-    )
+    ]
+
 
 def add_user_message(history, text):
     history.append(

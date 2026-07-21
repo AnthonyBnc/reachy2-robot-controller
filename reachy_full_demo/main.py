@@ -32,7 +32,7 @@ def run_one_demo_cycle(client, reachy, cycle_number):
         label="conversation reward grasp",
     )
 
-    run_goodbye()
+    run_goodbye(reachy)
 
 
 def main():

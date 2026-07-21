@@ -8,7 +8,13 @@ def run_greeting(reachy):
 
     say(
         "Hello everyone. I am Reachy, your Deakin campus guide. "
-        "I can greet visitors, hand over an object, and answer questions about Deakin."
+        "I can greet visitors, hand over an object, and answer questions about Deakin.",
+        reachy,
+        gesture="greeting",
     )
 
-    say("First, I will demonstrate my grasping movement.")
+    say(
+        "First, I will demonstrate my grasping movement.",
+        reachy,
+        gesture="calm",
+    )

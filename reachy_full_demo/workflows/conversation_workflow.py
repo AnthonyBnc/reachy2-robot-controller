@@ -39,7 +39,9 @@ def run_conversation(client, reachy):
 
     say(
         "Now you can ask me a question about Deakin. "
-        "For example, you can ask about courses, campus maps, buildings, or student services."
+        "For example, you can ask about courses, campus maps, buildings, or student services.",
+        reachy,
+        gesture="calm",
     )
 
     for question_number in range(MAX_QUESTIONS_PER_VISITOR):
@@ -63,11 +65,19 @@ def run_conversation(client, reachy):
             user_text = listen_to_user()
 
         if not user_text:
-            say("Sorry, I could not hear that clearly. Could you please try again?")
+            say(
+                "Sorry, I could not hear that clearly. Could you please try again?",
+                reachy,
+                gesture="thinking",
+            )
             continue
 
         if should_exit(user_text):
-            say("No problem. I will finish this conversation section.")
+            say(
+                "No problem. I will finish this conversation section.",
+                reachy,
+                gesture="calm",
+            )
             break
 
         try:
@@ -83,10 +93,22 @@ def run_conversation(client, reachy):
 
             add_assistant_message(conversation_history, answer)
 
-            say(answer)
+            say(
+                answer,
+                reachy,
+                gesture="thinking",
+            )
 
         except Exception as e:
             print("Conversation error:", e)
-            say("Sorry, I had a problem answering that question. Please try again.")
+            say(
+                "Sorry, I had a problem answering that question. Please try again.",
+                reachy,
+                gesture="thinking",
+            )
 
-    say("Thank you for chatting with me.")
+    say(
+        "Thank you for chatting with me.",
+        reachy,
+        gesture="goodbye",
+    )
