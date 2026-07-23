@@ -1,0 +1,26 @@
+# Reachy full demo dependencies
+
+# Robot SDK
+reachy2-sdk==1.0.7
+reachy2-sdk-api==1.0.11
+
+# AI client for OpenRouter
+openai
+
+# Numeric and pose handling
+numpy
+
+# Microphone recording and WAV file IO
+sounddevice
+soundfile
+
+# Speech-to-text
+faster-whisper
+
+# Text-to-speech
+kokoro
+
+# Windows notes:
+# - Audio playback uses Python's built-in winsound module, so no extra playback package is needed.
+# - If sounddevice cannot find the microphone, install/update the Windows audio driver and check the
+#   default input device in Windows Sound settings.

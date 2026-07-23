@@ -5,6 +5,11 @@ import platform
 import subprocess
 import threading
 
+if platform.system().lower() == "windows":
+    import winsound
+else:
+    winsound = None
+
 import numpy as np
 import soundfile as sf
 from kokoro import KPipeline
@@ -46,11 +51,11 @@ def _run_speech_motion(reachy, gesture):
 def play_audio(file_path):
     system = platform.system().lower()
 
-    if "darwin" in system:
-        subprocess.run(["afplay", file_path], check=False)
+    if "windows" in system:
+        winsound.PlaySound(file_path, winsound.SND_FILENAME)
 
-    elif "windows" in system:
-        os.startfile(file_path)
+    elif "darwin" in system:
+        subprocess.run(["afplay", file_path], check=False)
 
     else:
         subprocess.run(["aplay", file_path], check=False)
