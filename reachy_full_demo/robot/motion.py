@@ -243,6 +243,29 @@ def speaking_motion(reachy, stop_event=None, style="calm"):
         print("speaking_motion skipped:", e)
 
 
+def return_to_normal_state(reachy, arm=None):
+    if reachy is None:
+        return
+
+    if arm is None:
+        arm = reachy.r_arm
+
+    print()
+    print("Returning Reachy to normal state...")
+
+    try:
+        if arm is not None:
+            open_gripper(arm)
+            move_4x4(arm, BASE_POSE, duration=4.0)
+    except Exception as e:
+        print("Arm normal-state reset skipped:", e)
+
+    look_forward(reachy)
+    reset_antennas(reachy)
+
+    print("Reachy is back in normal state.")
+
+
 def grasp_handover_release(reachy, label="grasp"):
     if reachy is None:
         print(f"Skipping {label}: Reachy not connected.")
@@ -287,8 +310,8 @@ def grasp_handover_release(reachy, label="grasp"):
     open_gripper(arm)
     time.sleep(1.0)
 
-    wait_if_safety("Press Enter to return to BASE_POSE... ")
+    wait_if_safety("Cup released. Press Enter to return Reachy to normal state... ")
 
-    move_4x4(arm, BASE_POSE, duration=4.0)
+    return_to_normal_state(reachy, arm)
 
     print(f"{label} sequence complete.")
