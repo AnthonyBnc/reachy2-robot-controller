@@ -102,37 +102,11 @@ def close_gripper_for_ball(arm, opening=25):
     time.sleep(1.0)
 
 
-def main():
-    reachy = ReachySDK(host=ROBOT_HOST)
-
-    print("Connected:", reachy.is_connected())
-
-    if not reachy.is_connected():
-        raise RuntimeError("Cannot connect to Reachy.")
-
-    reachy.turn_on()
-
-    arm = reachy.r_arm
-
-    if arm is None:
-        raise RuntimeError("Right arm is not available.")
-
-    if arm.gripper is None:
-        raise RuntimeError("Right gripper is not available.")
-
+def run_grasp_cycle(arm, cycle_number):
     print()
-    print("Before starting:")
-    print("1. Put the ball in the exact same position as when you recorded the poses.")
-    print("2. Keep the E-stop nearby.")
-    print("3. Make sure the right arm path is clear.")
-    print("4. First test with no ball or with a soft ball.")
-    print()
-
-    confirm = input("Type yes to start the replay: ").strip().lower()
-
-    if confirm != "yes":
-        print("Cancelled.")
-        return
+    print("=" * 60)
+    print(f"Starting grasp cycle {cycle_number}")
+    print("=" * 60)
 
     open_gripper(arm)
 
@@ -169,9 +143,58 @@ def main():
     open_gripper(arm)
     time.sleep(1.0)
 
+    print("Returning through safe path...")
     move_4x4(arm, GRASP_POSE, duration=3.0)
     move_4x4(arm, PRE_GRASP_POSE, duration=4.0)
     move_4x4(arm, BASE_POSE, duration=4.0)
+
+    print(f"Grasp cycle {cycle_number} complete.")
+
+
+def main():
+    reachy = ReachySDK(host=ROBOT_HOST)
+
+    print("Connected:", reachy.is_connected())
+
+    if not reachy.is_connected():
+        raise RuntimeError("Cannot connect to Reachy.")
+
+    reachy.turn_on()
+
+    arm = reachy.r_arm
+
+    if arm is None:
+        raise RuntimeError("Right arm is not available.")
+
+    if arm.gripper is None:
+        raise RuntimeError("Right gripper is not available.")
+
+    print()
+    print("Before starting:")
+    print("1. Put the ball in the exact same position as when you recorded the poses.")
+    print("2. Keep the E-stop nearby.")
+    print("3. Make sure the right arm path is clear.")
+    print("4. First test with no ball or with a soft ball.")
+    print()
+
+    confirm = input("Type yes to start the replay: ").strip().lower()
+
+    if confirm != "yes":
+        print("Cancelled.")
+        return
+
+    cycle_number = 1
+
+    while True:
+        command = input(
+            "\nPress Enter to run the next grasp cycle, or type q to quit: "
+        ).strip().lower()
+
+        if command == "q":
+            break
+
+        run_grasp_cycle(arm, cycle_number)
+        cycle_number += 1
 
     print("Done.")
 
