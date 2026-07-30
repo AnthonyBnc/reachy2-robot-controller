@@ -15,7 +15,11 @@ from robot.poses import (
 
 def wait_if_safety(message):
     if SAFETY_PAUSES:
-        input(message)
+        try:
+            input(message)
+        except EOFError:
+            print()
+            raise RuntimeError("No input available for safety pause.")
 
 
 def validate_pose_matrix(pose):
@@ -104,6 +108,67 @@ def greeting_hand(reachy):
         print("greeting_hand skipped:", e)
 
 
+def _set_gripper_opening(arm, opening):
+    gripper = getattr(arm, "gripper", None)
+
+    if arm is None or gripper is None:
+        return
+
+    gripper.set_opening(opening)
+
+
+def speaking_hands(reachy, style="calm", index=0):
+    if reachy is None:
+        return
+
+    patterns = {
+        "greeting": [
+            (100, 55),
+            (55, 100),
+            (100, 70),
+            (70, 100),
+        ],
+        "thinking": [
+            (70, 90),
+            (90, 70),
+            (75, 75),
+        ],
+        "goodbye": [
+            (100, 45),
+            (45, 100),
+            (100, 55),
+            (70, 70),
+        ],
+        "calm": [
+            (85, 100),
+            (100, 85),
+            (75, 95),
+            (95, 75),
+        ],
+    }
+
+    left_opening, right_opening = patterns.get(style, patterns["calm"])[
+        index % len(patterns.get(style, patterns["calm"]))
+    ]
+
+    try:
+        _set_gripper_opening(reachy.l_arm, left_opening)
+        _set_gripper_opening(reachy.r_arm, right_opening)
+    except Exception as e:
+        print("speaking_hands skipped:", e)
+
+
+def reset_speaking_hands(reachy):
+    if reachy is None:
+        return
+
+    try:
+        _set_gripper_opening(reachy.l_arm, 75)
+        _set_gripper_opening(reachy.r_arm, 75)
+    except Exception as e:
+        print("reset_speaking_hands skipped:", e)
+
+
 def _antenna_goto(antenna, position, duration=0.4):
     if antenna is None:
         return
@@ -129,8 +194,13 @@ def set_antennas(reachy, left, right, duration=0.4):
     if reachy is None:
         return
 
-    _antenna_goto(reachy.head.l_antenna, left, duration=duration)
-    _antenna_goto(reachy.head.r_antenna, right, duration=duration)
+    head = getattr(reachy, "head", None)
+
+    if head is None:
+        return
+
+    _antenna_goto(getattr(head, "l_antenna", None), left, duration=duration)
+    _antenna_goto(getattr(head, "r_antenna", None), right, duration=duration)
 
 
 def reset_antennas(reachy):
@@ -227,6 +297,7 @@ def speaking_motion(reachy, stop_event=None, style="calm"):
             )
 
             emotion_antennas(reachy, emotion=emotion)
+            speaking_hands(reachy, style=style, index=index)
 
             index += 1
 
@@ -238,6 +309,7 @@ def speaking_motion(reachy, stop_event=None, style="calm"):
 
         look_forward(reachy)
         reset_antennas(reachy)
+        reset_speaking_hands(reachy)
 
     except Exception as e:
         print("speaking_motion skipped:", e)

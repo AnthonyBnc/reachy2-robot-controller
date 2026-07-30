@@ -48,9 +48,14 @@ def run_conversation(client, reachy):
         print()
         print(f"Conversation question {question_number + 1}/{MAX_QUESTIONS_PER_VISITOR}")
 
-        command = input(
-            "Press Enter to speak, type 't' to type, 'devices' for microphones, or 'skip' to finish: "
-        ).strip()
+        try:
+            command = input(
+                "Press Enter to speak, type 't' to type, 'devices' for microphones, or 'skip' to finish: "
+            ).strip()
+        except EOFError:
+            print()
+            print("No input available. Finishing conversation section.")
+            break
 
         if command.lower() == "skip":
             break
@@ -60,7 +65,12 @@ def run_conversation(client, reachy):
             continue
 
         if command.lower() == "t":
-            user_text = input("Visitor asks: ").strip()
+            try:
+                user_text = input("Visitor asks: ").strip()
+            except EOFError:
+                print()
+                print("No typed question available. Finishing conversation section.")
+                break
         else:
             user_text = listen_to_user()
 
@@ -96,7 +106,7 @@ def run_conversation(client, reachy):
             say(
                 answer,
                 reachy,
-                gesture="thinking",
+                gesture="calm",
             )
 
         except Exception as e:

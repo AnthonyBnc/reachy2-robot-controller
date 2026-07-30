@@ -53,7 +53,12 @@ def main():
     cycle_number = 1
 
     while True:
-        command = input("\nPress Enter to start next audience cycle, or type q to quit: ").strip()
+        try:
+            command = input("\nPress Enter to start next audience cycle, or type q to quit: ").strip()
+        except EOFError:
+            print()
+            print("No input available. Demo stopped.")
+            break
 
         if command.lower() == "q":
             print("Demo stopped.")

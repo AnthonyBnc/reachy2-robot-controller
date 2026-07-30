@@ -10,10 +10,6 @@ if platform.system().lower() == "windows":
 else:
     winsound = None
 
-import numpy as np
-import soundfile as sf
-from kokoro import KPipeline
-
 from config import (
     KOKORO_LANG_CODE,
     KOKORO_VOICE,
@@ -22,9 +18,25 @@ from config import (
 )
 
 
-print("Loading Kokoro TTS...")
-kokoro_pipeline = KPipeline(lang_code=KOKORO_LANG_CODE)
-print("Kokoro TTS ready.")
+kokoro_pipeline = None
+
+
+def get_kokoro_pipeline():
+    global kokoro_pipeline
+
+    if kokoro_pipeline is not None:
+        return kokoro_pipeline
+
+    try:
+        from kokoro import KPipeline
+    except ImportError as e:
+        raise RuntimeError("Kokoro TTS is not installed. Run: python -m pip install kokoro") from e
+
+    print("Loading Kokoro TTS...")
+    kokoro_pipeline = KPipeline(lang_code=KOKORO_LANG_CODE)
+    print("Kokoro TTS ready.")
+
+    return kokoro_pipeline
 
 
 def _run_speech_motion(reachy, gesture):
@@ -62,10 +74,18 @@ def play_audio(file_path):
 
 
 def generate_voice(text):
+    try:
+        import numpy as np
+        import soundfile as sf
+    except ImportError as e:
+        raise RuntimeError(
+            "Speech dependencies are not installed. Run: python -m pip install numpy soundfile"
+        ) from e
+
     if os.path.exists(OUTPUT_FILE):
         os.remove(OUTPUT_FILE)
 
-    generator = kokoro_pipeline(
+    generator = get_kokoro_pipeline()(
         text,
         voice=KOKORO_VOICE,
     )

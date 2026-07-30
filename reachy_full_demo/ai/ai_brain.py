@@ -1,5 +1,3 @@
-from openai import OpenAI 
-
 from config import OPENROUTER_API_KEY, OPENROUTER_MODEL
 from ai.knowledge_base import DEAKIN_SYSTEM_PROMPT
 
@@ -29,11 +27,18 @@ def clean_answer(answer: str) -> str:
     return answer.strip()
 
 def create_ai_client():
+    try:
+        from openai import OpenAI
+    except ImportError as e:
+        raise RuntimeError(
+            "OpenAI client is not installed. Run: python -m pip install openai"
+        ) from e
+
     if (
         not OPENROUTER_API_KEY
-        or OPENROUTER_API_KEY == "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"
+        or OPENROUTER_API_KEY == "PASTE_YOUR_OPENROUTER_API_KEY_HERE"
     ):
-        raise ValueError("Please paste your OpenRouter API key in config.py")
+        raise ValueError("Please set OPENROUTER_API_KEY or API_KEY in .env")
 
     return OpenAI(
         base_url="https://openrouter.ai/api/v1",

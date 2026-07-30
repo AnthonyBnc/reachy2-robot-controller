@@ -1,5 +1,27 @@
 # config.py
 
+import os
+from pathlib import Path
+
+
+def _load_local_env():
+    env_path = Path(__file__).resolve().parent.parent / ".env"
+
+    if not env_path.exists():
+        return
+
+    for line in env_path.read_text().splitlines():
+        clean_line = line.strip()
+
+        if not clean_line or clean_line.startswith("#") or "=" not in clean_line:
+            continue
+
+        key, value = clean_line.split("=", 1)
+        os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
+
+
+_load_local_env()
+
 # =========================================================
 # Reachy
 # =========================================================
@@ -16,7 +38,11 @@ SAFETY_PAUSES = True
 # OpenRouter
 # =========================================================
 
-OPENROUTER_API_KEY = "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"
+OPENROUTER_API_KEY = (
+    os.getenv("OPENROUTER_API_KEY")
+    or os.getenv("API_KEY")
+    or "PASTE_YOUR_OPENROUTER_API_KEY_HERE"
+)
 OPENROUTER_MODEL = "openai/gpt-4o-mini"
 
 

@@ -1,10 +1,5 @@
 # voice/microphone_io.py
 
-import numpy as np
-import sounddevice as sd
-import soundfile as sf
-from faster_whisper import WhisperModel
-
 from config import (
     SAMPLE_RATE,
     MIC_INPUT_FILE,
@@ -18,18 +13,45 @@ from config import (
 
 
 CHANNELS = 1
+stt_model = None
 
 
-print("Loading speech-to-text model...")
-stt_model = WhisperModel(
-    WHISPER_MODEL_SIZE,
-    device="cpu",
-    compute_type="int8",
-)
-print("Speech-to-text model ready.")
+def get_sounddevice():
+    try:
+        import sounddevice as sd
+    except ImportError as e:
+        raise RuntimeError("sounddevice is not installed. Run: python -m pip install sounddevice") from e
+
+    return sd
+
+
+def get_stt_model():
+    global stt_model
+
+    if stt_model is not None:
+        return stt_model
+
+    try:
+        from faster_whisper import WhisperModel
+    except ImportError as e:
+        raise RuntimeError(
+            "faster-whisper is not installed. Run: python -m pip install faster-whisper"
+        ) from e
+
+    print("Loading speech-to-text model...")
+    stt_model = WhisperModel(
+        WHISPER_MODEL_SIZE,
+        device="cpu",
+        compute_type="int8",
+    )
+    print("Speech-to-text model ready.")
+
+    return stt_model
 
 
 def show_microphones():
+    sd = get_sounddevice()
+
     print()
     print("Available audio devices:")
     print(sd.query_devices())
@@ -37,10 +59,17 @@ def show_microphones():
 
 
 def calculate_volume(audio_chunk):
+    import numpy as np
+
     return float(np.sqrt(np.mean(audio_chunk ** 2)))
 
 
 def record_until_silence():
+    import numpy as np
+    import soundfile as sf
+
+    sd = get_sounddevice()
+
     print()
     print("Listening...")
     print("Start speaking. I will stop recording when you are silent.")
@@ -107,7 +136,7 @@ def record_until_silence():
 
 
 def transcribe_audio(file_path):
-    segments, info = stt_model.transcribe(
+    segments, info = get_stt_model().transcribe(
         file_path,
         beam_size=5,
         language="en",
