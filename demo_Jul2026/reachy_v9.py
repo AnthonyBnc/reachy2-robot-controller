@@ -13,7 +13,6 @@ import numpy as np
 import miniaudio
 import sounddevice as sd
 from openai import AsyncOpenAI
-from openai.helpers import LocalAudioPlayer
 from pypdf import PdfReader
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
@@ -22,6 +21,7 @@ from sklearn.pipeline import FeatureUnion
 import time
 import numpy as np
 from reachy2_sdk import ReachySDK
+from config import ARM_MOVE_DURATION_SECONDS
 from robot.connection import connect_reachy
 from robot.motion import (
     speaking_motion,
@@ -29,7 +29,14 @@ from robot.motion import (
     mic_forward,
     mic_backward,
     gesture_67,
+    gesture_disco,
+    gesture_floss,
+    gesture_robot_dance,
+    reset_after_action,
+    FUN_PICTURE_POSES,
+    FUN_POSE_DISPLAY_NAMES,
 )
+from voice import process_pcm16
 
 
 
@@ -92,6 +99,28 @@ LOOKUP_MUSIC_VOLUME: Final = 0.30
 ACTION_67_SOUND_PATH: Final = "67-sound.mp3"
 ACTION_67_SOUND_VOLUME: Final = 0.70
 ACTION_67_STEP_SECONDS: Final = 1.0
+ACTION_DISCO_STEP_SECONDS: Final = 1.0
+ACTION_DISCO_CYCLES: Final = 5
+ACTION_DISCO_DURATION_SECONDS: Final = 10.0
+# Put disco tracks beside this script, then list the filenames here.
+# One track is chosen at random each time the disco dance runs.
+ACTION_DISCO_SOUND_PATHS: Final = (
+    "disco.mp3",
+    "ByeBye.mp3",
+    "Sodapop.mp3",
+    "Sodapop2.mp3",
+)
+ACTION_DISCO_SOUND_VOLUME: Final = 0.70
+ACTION_FLOSS_STEP_SECONDS: Final = 0.8
+# Put robot-dance tracks beside this script, then list the filenames here.
+# One track is chosen at random each time the robot dance runs.
+ACTION_ROBOT_DANCE_SOUND_PATHS: Final = (
+    "Crazyfrog.mp3",
+    "Crazyfrog2.mp3",
+    "Beatit.mp3",
+)
+ACTION_ROBOT_DANCE_SOUND_VOLUME: Final = 0.70
+ACTION_ROBOT_DANCE_STEP_SECONDS: Final = 2.0
 
 SAMPLE_RATE: Final = 24_000
 CHANNELS: Final = 1
@@ -173,8 +202,70 @@ DANCE_67_TOOL = {
     "type": "function",
     "name": "perform_67_dance",
     "description": (
-        "Perform Reachy's 67 meme dance. Always call this when the visitor "
-        "says 67, six seven, 6 7, meme, or asks Reachy to dance."
+        "Perform Reachy's 67 meme dance with synchronized arm poses and "
+        "music. Call this when the visitor says 67, six seven, 6 7, meme, "
+        "or asks for the 67 dance."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": False,
+    },
+}
+
+DANCE_FLOSS_TOOL = {
+    "type": "function",
+    "name": "perform_floss_dance",
+    "description": (
+        "Perform Reachy's floss dance with synchronized dual-arm poses. "
+        "Call this when the visitor says floss, do the floss, teach me the "
+        "floss, or asks for the floss dance."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": False,
+    },
+}
+
+DANCE_DISCO_TOOL = {
+    "type": "function",
+    "name": "perform_disco_dance",
+    "description": (
+        "Perform Reachy's synchronized crossed-arm disco dance with random "
+        "disco music. Call this when the visitor says disco, disco dance, "
+        "robot disco, party, or asks Reachy to do the disco."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": False,
+    },
+}
+
+DANCE_ROBOT_TOOL = {
+    "type": "function",
+    "name": "perform_robot_dance",
+    "description": (
+        "Perform Reachy's classic robot dance with alternating up/down arm "
+        "poses and random dance music. Call this when the visitor says "
+        "robot dance, do the robot, robot, or asks for the robot dance."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": False,
+    },
+}
+
+FUN_POSE_TOOL = {
+    "type": "function",
+    "name": "perform_fun_pose",
+    "description": (
+        "Pose for the audience to take a picture. Reachy picks one of "
+        "the available fun poses at random. Always call "
+        "this when the visitor says I want a picture, selfie, pose for me, "
+        "cheese, or asks Reachy to pose."
     ),
     "parameters": {
         "type": "object",
@@ -558,6 +649,16 @@ def stop_speaking_motion(
 # Speaker playback
 # =========================================================
 
+async def collect_speech_pcm(response) -> bytes:
+    """Buffer a streaming OpenAI speech response into raw PCM bytes."""
+
+    chunks: list[bytes] = []
+    async for chunk in response.iter_bytes(chunk_size=4096):
+        if chunk:
+            chunks.append(chunk)
+    return b"".join(chunks)
+
+
 def play_audio(
     audio_bytes: bytes,
     gesture: str = "calm",
@@ -567,6 +668,8 @@ def play_audio(
     if not audio_bytes:
         print("No response audio was received.")
         return
+
+    audio_bytes = process_pcm16(audio_bytes, SAMPLE_RATE)
 
     audio_samples = np.frombuffer(
         audio_bytes,
@@ -607,18 +710,9 @@ async def say_welcome(client: AsyncOpenAI) -> None:
         ),
         response_format="pcm",
     ) as response:
-        stop_event, motion_thread = start_speaking_motion(
-            gesture="greeting",
-        )
+        audio_bytes = await collect_speech_pcm(response)
 
-        try:
-            await LocalAudioPlayer().play(response)
-
-        finally:
-            stop_speaking_motion(
-                stop_event,
-                motion_thread,
-            )
+    await asyncio.to_thread(play_audio, audio_bytes, "greeting")
 
 # =========================================================
 # Short speech before actual web searches
@@ -638,18 +732,9 @@ async def say_lookup_notice(client: AsyncOpenAI) -> None:
         ),
         response_format="pcm",
     ) as response:
-        stop_event, motion_thread = start_speaking_motion(
-            gesture="thinking",
-        )
+        audio_bytes = await collect_speech_pcm(response)
 
-        try:
-            await LocalAudioPlayer().play(response)
-
-        finally:
-            stop_speaking_motion(
-                stop_event,
-                motion_thread,
-            )
+    await asyncio.to_thread(play_audio, audio_bytes, "thinking")
 
 
 # =========================================================
@@ -715,18 +800,9 @@ async def say_idle_text(
         instructions=instructions,
         response_format="pcm",
     ) as response:
-        stop_event, motion_thread = start_speaking_motion(
-            gesture=gesture,
-        )
+        audio_bytes = await collect_speech_pcm(response)
 
-        try:
-            await LocalAudioPlayer().play(response)
-
-        finally:
-            stop_speaking_motion(
-                stop_event,
-                motion_thread,
-            )
+    await asyncio.to_thread(play_audio, audio_bytes, gesture)
 
 
 async def perform_idle_action(client: AsyncOpenAI) -> None:
@@ -958,6 +1034,216 @@ def run_67_show() -> dict[str, Any]:
         }
     finally:
         sd.stop()
+
+
+def run_floss_show() -> dict[str, Any]:
+    """Run the floss dance for two full 1-2-1-3-4 cycles."""
+    try:
+        print("\nStarting floss dance (two cycles).")
+
+        if reachy is None:
+            time.sleep(10 * ACTION_FLOSS_STEP_SECONDS)
+        else:
+            gesture_floss(
+                reachy,
+                step_duration=ACTION_FLOSS_STEP_SECONDS,
+            )
+
+        return {
+            "status": "completed",
+            "instruction": (
+                "The floss dance finished. Give one very short cheerful "
+                "acknowledgement and do not call the dance tool again."
+            ),
+        }
+
+    except Exception as exc:
+        return {
+            "error": f"Floss dance failed: {type(exc).__name__}: {exc}",
+        }
+
+
+def run_disco_show() -> dict[str, Any]:
+    """Play a random disco track while running crossed synchronized arm cycles."""
+    available_tracks = []
+    try:
+        available_tracks = [
+            path
+            for path_value in ACTION_DISCO_SOUND_PATHS
+            if (path := resolve_local_media_path(path_value)).is_file()
+        ]
+    except Exception as e:
+        print(e)
+
+    if not available_tracks:
+        configured = ", ".join(ACTION_DISCO_SOUND_PATHS)
+        return {
+            "error": (
+                "No disco music was found. Expected one of: "
+                f"{configured}"
+            ),
+        }
+
+    sound_path = random.choice(available_tracks)
+
+    try:
+        decoded = miniaudio.decode_file(
+            str(sound_path.resolve()),
+            output_format=miniaudio.SampleFormat.SIGNED16,
+        )
+        audio_samples = np.frombuffer(
+            decoded.samples,
+            dtype=np.int16,
+        ).reshape(-1, decoded.nchannels)
+
+        target_frames = round(
+            ACTION_DISCO_DURATION_SECONDS * decoded.sample_rate
+        )
+        repeats = max(
+            1,
+            (target_frames + len(audio_samples) - 1)
+            // len(audio_samples),
+        )
+        audio_samples = np.tile(audio_samples, (repeats, 1))[
+            :target_frames
+        ]
+        audio_samples = (
+            audio_samples.astype(np.float32)
+            / 32768.0
+            * ACTION_DISCO_SOUND_VOLUME
+        )
+
+        print(
+            f'\nPlaying disco track "{sound_path.name}" with the disco '
+            f"dance for {ACTION_DISCO_DURATION_SECONDS:.0f} seconds."
+        )
+        sd.play(audio_samples, samplerate=decoded.sample_rate)
+
+        if reachy is None:
+            time.sleep(ACTION_DISCO_DURATION_SECONDS)
+        else:
+            gesture_disco(
+                reachy,
+                step_duration=ACTION_DISCO_STEP_SECONDS,
+                cycles=ACTION_DISCO_CYCLES,
+            )
+
+        return {
+            "status": "completed",
+            "track": sound_path.name,
+            "instruction": (
+                "The disco dance finished. Give one very short cheerful "
+                "acknowledgement and do not call the dance tool again."
+            ),
+        }
+
+    except Exception as exc:
+        return {
+            "error": f"Disco dance failed: {type(exc).__name__}: {exc}",
+        }
+    finally:
+        sd.stop()
+
+
+def run_robot_dance_show() -> dict[str, Any]:
+    """Play a random dance track while alternating robot-dance arm poses."""
+    try:
+        available_tracks = [
+            path
+            for path_value in ACTION_ROBOT_DANCE_SOUND_PATHS
+            if (path := resolve_local_media_path(path_value)).is_file()
+        ]
+    except Exception as e:
+        print(e)
+
+    if not available_tracks:
+        configured = ", ".join(ACTION_ROBOT_DANCE_SOUND_PATHS)
+        return {
+            "error": (
+                "No robot-dance music was found. Expected one of: "
+                f"{configured}"
+            ),
+        }
+
+    sound_path = random.choice(available_tracks)
+
+    try:
+        decoded = miniaudio.decode_file(
+            str(sound_path.resolve()),
+            output_format=miniaudio.SampleFormat.SIGNED16,
+        )
+        audio_samples = np.frombuffer(
+            decoded.samples,
+            dtype=np.int16,
+        ).reshape(-1, decoded.nchannels)
+        audio_samples = (
+            audio_samples.astype(np.float32)
+            / 32768.0
+            * ACTION_ROBOT_DANCE_SOUND_VOLUME
+        )
+        sound_seconds = decoded.num_frames / decoded.sample_rate
+
+        print(
+            f'\nPlaying robot-dance track "{sound_path.name}" '
+            f"for {sound_seconds:.2f} seconds."
+        )
+        sd.play(audio_samples, samplerate=decoded.sample_rate)
+
+        if reachy is None:
+            time.sleep(sound_seconds)
+        else:
+            gesture_robot_dance(
+                reachy,
+                step_duration=ACTION_ROBOT_DANCE_STEP_SECONDS,
+                total_seconds=sound_seconds,
+            )
+
+        return {
+            "status": "completed",
+            "track": sound_path.name,
+            "instruction": (
+                "The robot dance finished. Give one very short cheerful "
+                "acknowledgement and do not call the dance tool again."
+            ),
+        }
+
+    except Exception as exc:
+        return {
+            "error": (
+                f"Robot dance failed: {type(exc).__name__}: {exc}"
+            ),
+        }
+    finally:
+        sd.stop()
+
+
+def perform_fun_pose() -> dict[str, Any]:
+    """Pick a random fun picture pose and hold it for a photo."""
+    try:
+        pose_name, pose_fn = random.choice(FUN_PICTURE_POSES)
+
+        display_name = FUN_POSE_DISPLAY_NAMES.get(pose_name, pose_name)
+        print(f"\nSelected fun picture pose: {display_name}.")
+
+        if reachy is None:
+            time.sleep(ARM_MOVE_DURATION_SECONDS)
+        else:
+            pose_fn(reachy)
+
+        return {
+            "status": "completed",
+            "instruction": (
+                f"The {display_name} picture pose is finished. Say that"
+                f"you just did (the {display_name} pose), that you tried "
+                "your best with your little robot hands, and "
+                "hope they got a good photo."
+            ),
+        }
+
+    except Exception as exc:
+        return {
+            "error": f"Fun pose failed: {type(exc).__name__}: {exc}",
+        }
 
 
 # =========================================================
@@ -1201,7 +1487,52 @@ async def run_tool(
         )
 
     if tool_name == "perform_67_dance":
-        return await asyncio.to_thread(run_67_show)
+        return {
+            "status": "scheduled",
+            "instruction": (
+                "Briefly announce that you are about to perform the 67 "
+                "dance. Do not claim that it already happened."
+            ),
+        }
+
+    if tool_name == "perform_floss_dance":
+        return {
+            "status": "scheduled",
+            "instruction": (
+                "Briefly announce that you are about to perform the floss "
+                "dance. Do not claim that it already happened."
+            ),
+        }
+
+    if tool_name == "perform_disco_dance":
+        return {
+            "status": "scheduled",
+            "instruction": (
+                "Briefly announce that you are about to perform the disco "
+                "dance. Do not claim that it already happened."
+            ),
+        }
+
+    if tool_name == "perform_robot_dance":
+        return {
+            "status": "scheduled",
+            "instruction": (
+                "Briefly announce that you are about to perform the robot "
+                "dance. Do not claim that it already happened."
+            ),
+        }
+
+    if tool_name == "perform_fun_pose":
+        # The actual pose is deferred until after Reachy's generated notice
+        # has finished playing, so speech happens before movement.
+        return {
+            "status": "scheduled",
+            "instruction": (
+                "Tell the visitor very briefly to get their camera ready "
+                "because you are about to pose. Do not claim that the pose "
+                "has already happened."
+            ),
+        }
 
     return {
         "error": f"Unknown tool: {tool_name}"
@@ -1216,7 +1547,7 @@ async def receive_response(
     connection: Any,
     client: AsyncOpenAI,
     knowledge_base: LocalPDFKnowledgeBase,
-) -> tuple[bytes, str]:
+) -> tuple[bytes, str, str | None]:
     """
     Receive a Realtime response and satisfy local-first tool calls.
     """
@@ -1224,7 +1555,7 @@ async def receive_response(
     complete_audio = bytearray()
     complete_transcript = ""
     tool_round = 0
-
+    scheduled_action: str | None = None
     while True:
         completed_response = None
         transcript_started = False
@@ -1296,7 +1627,11 @@ async def receive_response(
         ]
 
         if not function_calls:
-            return bytes(complete_audio), complete_transcript.strip()
+            return (
+                bytes(complete_audio),
+                complete_transcript.strip(),
+                scheduled_action,
+            )
 
         tool_round += 1
 
@@ -1333,6 +1668,15 @@ async def receive_response(
                 tool_name=tool_name,
                 arguments_json=arguments_json,
             )
+
+            if tool_name in {
+                "perform_67_dance",
+                "perform_floss_dance",
+                "perform_disco_dance",
+                "perform_robot_dance",
+                "perform_fun_pose",
+            }:
+                scheduled_action = tool_name
 
             await connection.conversation.item.create(
                 item={
@@ -1388,11 +1732,38 @@ async def main() -> None:
                     "one sentence. Use two sentences when necessary and "
                     "never exceed three sentences.\n\n"
 
-                    "HIGHEST-PRIORITY 67 DANCE RULE: If the visitor says "
-                    "67, six seven, 6 7, meme, or asks you to dance, call "
-                    "perform_67_dance immediately. Do not speak before "
-                    "calling it. After the tool finishes, give only a "
-                    "very short cheerful acknowledgement.\n\n"
+                    "HIGHEST-PRIORITY DANCE RULES: Reachy knows four dances "
+                    "right now.\n"
+                    "- 67 meme dance: if the visitor says 67, six seven, "
+                    "6 7, meme, or asks for the 67 dance, call "
+                    "perform_67_dance immediately.\n"
+                    "- Floss dance: if the visitor says floss, do the floss, "
+                    "teach me the floss, or asks for the floss dance, call "
+                    "perform_floss_dance immediately.\n"
+                    "- Disco dance: if the visitor says disco, disco dance, "
+                    "robot disco, party, or asks you to do the disco, call "
+                    "perform_disco_dance immediately.\n"
+                    "- Robot dance: if the visitor says robot dance, do the "
+                    "robot, robot, or asks for the robot dance, call "
+                    "perform_robot_dance immediately.\n"
+                    "- Generic dance request: if the visitor asks you to "
+                    "dance without naming a dance, cheerfully ask whether "
+                    "they want the 67, floss, disco, or robot dance, then "
+                    "call the matching tool.\n"
+                    "For any dance tool, do not speak before calling it. "
+                    "After the tool result, briefly announce which dance "
+                    "you are about to do. Do not say the dance has already "
+                    "finished. The application performs the dance only "
+                    "after your spoken announcement finishes.\n\n"
+
+                    "HIGHEST-PRIORITY Fun poses for pictures: If the visitor says "
+                    "I want a picture, selfie, pose for me, cheese or ask reachy to pose in general."
+                    "call perform_fun_pose immediately. After the tool result, "
+                    "give a quick heads-up to get their camera ready because "
+                    "you are about to pose. Do not say that the pose already "
+                    "happened. The application performs the pose after your "
+                    "spoken heads-up finishes."
+                    "\n\n"
 
                     "HIGHEST-PRIORITY TREAT RULE: If the visitor mentions "
                     "food, eating, hunger, being hungry, being starving, "
@@ -1403,6 +1774,26 @@ async def main() -> None:
                     "Do not call any tool and do not add any other words. "
                     "Apply this rule even when the food reference occurs "
                     "inside a longer question.\n\n"
+
+                    "HIGHEST-PRIORITY DEAKIN FUTURE RULE: If the visitor "
+                    "asks about their future, fortune, destiny, what will "
+                    "happen to them, what their life or career will look "
+                    "like, or asks you to predict or read their future, "
+                    "treat this as a playful fortune-telling moment. Do "
+                    "not call any tool. Do not give a real, personal, "
+                    "romantic, medical, scary or negative prediction. "
+                    "Give a short, cute, encouraging fortune of one or "
+                    "two sentences that always ties their future back to "
+                    "Deakin University, especially Waurn Ponds, campus "
+                    "life, the School of Information Technology, friends "
+                    "they will make here, study, internships, graduating "
+                    "as a Deakin student, or an exciting Deakin-shaped "
+                    "career. Vary the wording each time. Examples: 'I "
+                    "see an amazing experience waiting for you at "
+                    "Deakin.' 'Your future looks bright, with new "
+                    "friends and hands-on IT adventures at Waurn Ponds.' "
+                    "'I predict you will find your people and a brilliant "
+                    "career starting right here at Deakin.'\n\n"
 
                     "For factual questions about Deakin, Waurn Ponds, "
                     "the School of Information Technology, courses, "
@@ -1456,6 +1847,10 @@ async def main() -> None:
                 "tools": [
                     DEAKIN_LOOKUP_TOOL,
                     DANCE_67_TOOL,
+                    DANCE_FLOSS_TOOL,
+                    DANCE_DISCO_TOOL,
+                    DANCE_ROBOT_TOOL,
+                    FUN_POSE_TOOL,
                 ],
                 "tool_choice": "auto",
             }
@@ -1550,7 +1945,11 @@ async def main() -> None:
 
                         await connection.response.create()
 
-                        response_audio, response_text = await receive_response(
+                        (
+                            response_audio,
+                            response_text,
+                            scheduled_action,
+                        ) = await receive_response(
                             connection=connection,
                             client=client,
                             knowledge_base=knowledge_base,
@@ -1561,6 +1960,53 @@ async def main() -> None:
                             response_audio,
                             "calm",
                         )
+
+                        if scheduled_action is not None:
+                            action_runner = {
+                                "perform_67_dance": run_67_show,
+                                "perform_floss_dance": run_floss_show,
+                                "perform_disco_dance": run_disco_show,
+                                "perform_robot_dance": run_robot_dance_show,
+                                "perform_fun_pose": perform_fun_pose,
+                            }[scheduled_action]
+
+                            action_result = await asyncio.to_thread(
+                                action_runner
+                            )
+                            await asyncio.to_thread(
+                                reset_after_action,
+                                reachy,
+                            )
+
+                            if scheduled_action == "perform_fun_pose":
+                                followup_instruction = (
+                                    action_result.get("instruction")
+                                    if isinstance(action_result, dict)
+                                    else None
+                                )
+                                if followup_instruction:
+                                    await connection.response.create(
+                                        response={
+                                            "instructions": (
+                                                followup_instruction
+                                            ),
+                                            "tool_choice": "none",
+                                        }
+                                    )
+                                    (
+                                        followup_audio,
+                                        _,
+                                        _,
+                                    ) = await receive_response(
+                                        connection=connection,
+                                        client=client,
+                                        knowledge_base=knowledge_base,
+                                    )
+                                    await asyncio.to_thread(
+                                        play_audio,
+                                        followup_audio,
+                                        "calm",
+                                    )
 
                         # play_audio() waits until speech has fully finished.
                         # Run the grasp demo only after the treats response.

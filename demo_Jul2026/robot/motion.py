@@ -5,13 +5,19 @@ from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 
-from config import ARM_MOVE_DURATION_SECONDS, SAFETY_PAUSES
+from config import ARM_MOVE_DURATION_SECONDS, POSE_HOLD_SECONDS, SAFETY_PAUSES
 from robot.poses import (
+    CUP_START_POSE,
+    CUP_APPROACH_POSE,
+    CUP_GRASP_POSE,
+    CUP_LIFT_POSE,
+    CUP_HANDOVER_POSE,
     BASE_POSE,
-    PRE_GRASP_POSE,
-    GRASP_POSE,
-    LIFT_POSE,
-    HANDOVER_POSE,
+    CUP_START_POSE,
+    CUP_APPROACH_POSE,
+    CUP_GRASP_POSE,
+    CUP_LIFT_POSE,
+    CUP_HANDOVER_POSE,
     MIC_POSE,
     VISITOR_POSE,
     REACHYMIC_POSE,
@@ -19,6 +25,29 @@ from robot.poses import (
     RIGHT_67_POSE_2,
     LEFT_67_POSE_1,
     LEFT_67_POSE_2,
+    RIGHT_DISCO_POSE_1,
+    RIGHT_DISCO_POSE_2,
+    LEFT_DISCO_POSE_1,
+    LEFT_DISCO_POSE_2,
+    LEFT_ROBOT_DANCE_UP,
+    LEFT_ROBOT_DANCE_DOWN,
+    RIGHT_ROBOT_DANCE_UP,
+    RIGHT_ROBOT_DANCE_DOWN,
+    RIGHT_FLOSS_POSE_1,
+    RIGHT_FLOSS_POSE_2,
+    RIGHT_FLOSS_POSE_3,
+    RIGHT_FLOSS_POSE_4,
+    LEFT_FLOSS_POSE_1,
+    LEFT_FLOSS_POSE_2,
+    LEFT_FLOSS_POSE_3,
+    LEFT_FLOSS_POSE_4,
+    RIGHT_PICTURE_LBERTY_POSE,
+    LEFT_PICTURE_LBERTY_POSE,
+    LEFT_PICTURE_DAB_POSE,
+    RIGHT_PICTURE_DAB_POSE,
+    LEFT_PICTURE_YAHOO_POSE,
+    RIGHT_PICTURE_YAHOO_POSE,
+    RIGHT_PICTURE_YAHOO_INTERMEDIATE_POSE,
 )
 
 
@@ -60,7 +89,14 @@ def move_4x4(arm, pose, duration=3.0):
     )
 
 
-def move_both_arms(reachy, left_pose, right_pose, duration=None):
+def move_both_arms(
+    reachy,
+    left_pose,
+    right_pose,
+    duration=None,
+    left_intermediate=None,
+    right_intermediate=None,
+):
     """Move both arms concurrently and wait for both moves to finish."""
     def move_arm(arm, pose):
         if duration is None:
@@ -73,6 +109,20 @@ def move_both_arms(reachy, left_pose, right_pose, duration=None):
             duration=duration,
             wait=True,
         )
+
+    if left_intermediate is not None or right_intermediate is not None:
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            via_moves = []
+            if left_intermediate is not None:
+                via_moves.append(
+                    executor.submit(move_arm, reachy.l_arm, left_intermediate)
+                )
+            if right_intermediate is not None:
+                via_moves.append(
+                    executor.submit(move_arm, reachy.r_arm, right_intermediate)
+                )
+            for via_move in via_moves:
+                via_move.result()
 
     with ThreadPoolExecutor(max_workers=2) as executor:
         left_move = executor.submit(move_arm, reachy.l_arm, left_pose)
@@ -119,14 +169,304 @@ def gesture_67(reachy, step_duration=None, total_seconds=None):
     print("67 gesture complete.")
 
 
+def gesture_disco(reachy, step_duration=1.0, cycles=2):
+    """Perform crossed synchronized disco poses for complete cycles."""
+    if reachy is None:
+        print("Skipping disco gesture: Reachy not connected.")
+        return
+
+    if reachy.l_arm is None or reachy.r_arm is None:
+        print("Skipping disco gesture: both arms are required.")
+        return
+
+    print(f"\nStarting synchronized disco dance ({cycles} cycles).")
+
+    crossed_pairs = (
+        # Right pose 1 moves with left pose 2.
+        (LEFT_DISCO_POSE_2, RIGHT_DISCO_POSE_1),
+        # Right pose 2 moves with left pose 1.
+        (LEFT_DISCO_POSE_1, RIGHT_DISCO_POSE_2),
+    )
+
+    for _ in range(cycles):
+        for left_pose, right_pose in crossed_pairs:
+            move_both_arms(
+                reachy,
+                left_pose=left_pose,
+                right_pose=right_pose,
+                duration=step_duration,
+            )
+
+    print("Disco dance complete.")
+
+
+def gesture_robot_dance(reachy, step_duration=None, total_seconds=None):
+    """Perform the alternating up/down two-pose robot dance."""
+    if reachy is None:
+        print("Skipping robot dance: Reachy not connected.")
+        return
+
+    if reachy.l_arm is None or reachy.r_arm is None:
+        print("Skipping robot dance: both arms are required.")
+        return
+
+    print("\nStarting synchronized robot dance.")
+
+    pairs = (
+        (LEFT_ROBOT_DANCE_UP, RIGHT_ROBOT_DANCE_DOWN),
+        (LEFT_ROBOT_DANCE_DOWN, RIGHT_ROBOT_DANCE_UP),
+    )
+    started_at = time.monotonic()
+    step = 0
+
+    while True:
+        left_pose, right_pose = pairs[step % len(pairs)]
+        move_both_arms(
+            reachy,
+            left_pose=left_pose,
+            right_pose=right_pose,
+            duration=step_duration,
+        )
+        step += 1
+
+        if total_seconds is None:
+            if step >= len(pairs):
+                break
+        elif time.monotonic() - started_at >= total_seconds:
+            break
+
+    print("Robot dance complete.")
+
+
+FLOSS_POSES = (
+    (LEFT_FLOSS_POSE_1, RIGHT_FLOSS_POSE_1),
+    (LEFT_FLOSS_POSE_2, RIGHT_FLOSS_POSE_2),
+    (LEFT_FLOSS_POSE_3, RIGHT_FLOSS_POSE_3),
+    (LEFT_FLOSS_POSE_4, RIGHT_FLOSS_POSE_4),
+)
+
+# One full floss cycle: positions 1 -> 2 -> 1 -> 3 -> 4 (0-based indices).
+FLOSS_CYCLE = (0, 1, 0, 2, 3)
+
+
+def gesture_floss(reachy, step_duration=None):
+    """Perform the synchronized four-pose floss dance."""
+    if reachy is None:
+        print("Skipping floss gesture: Reachy not connected.")
+        return
+
+    if reachy.l_arm is None or reachy.r_arm is None:
+        print("Skipping floss gesture: both arms are required.")
+        return
+
+    print("\nStarting synchronized floss dance.")
+
+    # Exactly two cycles: 1 -> 2 -> 1 -> 3 -> 4, twice.
+    sequence = FLOSS_CYCLE * 2
+
+    for pose_index in sequence:
+        left_pose, right_pose = FLOSS_POSES[pose_index]
+        move_both_arms(
+            reachy,
+            left_pose=left_pose,
+            right_pose=right_pose,
+            duration=step_duration,
+        )
+
+    print("Floss dance complete.")
+
+
+def _fun_picture_pose(
+    reachy,
+    left_pose,
+    right_pose,
+    label,
+    head_look=None,
+    left_intermediate=None,
+    right_intermediate=None,
+):
+    """Move both arms into one synchronized fun-picture pose."""
+    if reachy is None:
+        print(f"Skipping {label} pose: Reachy not connected.")
+        return
+
+    if reachy.l_arm is None or reachy.r_arm is None:
+        print(f"Skipping {label} pose: both arms are required.")
+        return
+
+    print(f"\nStarting synchronized fun picture pose: {label}.")
+
+    try:
+        if head_look is None:
+            if left_intermediate is not None or right_intermediate is not None:
+                move_both_arms(
+                    reachy,
+                    left_pose=left_pose,
+                    right_pose=right_pose,
+                    duration=None,
+                    left_intermediate=left_intermediate,
+                    right_intermediate=right_intermediate,
+                )
+            else:
+                move_both_arms(
+                    reachy,
+                    left_pose=left_pose,
+                    right_pose=right_pose,
+                    duration=None,
+                )
+        else:
+            if left_intermediate is not None or right_intermediate is not None:
+                with ThreadPoolExecutor(max_workers=2) as executor:
+                    via_moves = []
+                    if left_intermediate is not None:
+                        via_moves.append(
+                            executor.submit(
+                                move_4x4,
+                                reachy.l_arm,
+                                left_intermediate,
+                            )
+                        )
+                    if right_intermediate is not None:
+                        via_moves.append(
+                            executor.submit(
+                                move_4x4,
+                                reachy.r_arm,
+                                right_intermediate,
+                            )
+                        )
+                    for via_move in via_moves:
+                        via_move.result()
+
+            x, y, z, duration = head_look
+
+            def move_head():
+                reachy.head.look_at(
+                    x=x,
+                    y=y,
+                    z=z,
+                    duration=duration,
+                )
+
+            with ThreadPoolExecutor(max_workers=3) as executor:
+                head_move = executor.submit(move_head)
+                left_move = executor.submit(
+                    move_4x4,
+                    reachy.l_arm,
+                    left_pose,
+                )
+                right_move = executor.submit(
+                    move_4x4,
+                    reachy.r_arm,
+                    right_pose,
+                )
+                head_move.result()
+                left_move.result()
+                right_move.result()
+        print(f"{label} pose completed.")
+        print(f"Holding the pose for {POSE_HOLD_SECONDS:.0f} seconds.")
+        time.sleep(POSE_HOLD_SECONDS)
+
+        if left_intermediate is not None or right_intermediate is not None:
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                via_moves = []
+                if left_intermediate is not None:
+                    via_moves.append(
+                        executor.submit(
+                            move_4x4,
+                            reachy.l_arm,
+                            left_intermediate,
+                        )
+                    )
+                if right_intermediate is not None:
+                    via_moves.append(
+                        executor.submit(
+                            move_4x4,
+                            reachy.r_arm,
+                            right_intermediate,
+                        )
+                    )
+                for via_move in via_moves:
+                    via_move.result()
+    except Exception as e:
+        print(e)
+
+    
+
+
+def fun_pose_liberty(reachy, step_duration=None, total_seconds=None):
+    """Perform the Statue of Liberty fun picture pose (fnps1)."""
+    _fun_picture_pose(
+        reachy,
+        LEFT_PICTURE_LBERTY_POSE,
+        RIGHT_PICTURE_LBERTY_POSE,
+        "liberty",
+    )
+
+
+def fun_pose_dab(reachy, step_duration=None, total_seconds=None):
+    """Perform the dab fun picture pose (fnps2)."""
+    _fun_picture_pose(
+        reachy,
+        LEFT_PICTURE_DAB_POSE,
+        RIGHT_PICTURE_DAB_POSE,
+        "dab",
+        head_look=(
+            0.5,
+            0.0,
+            -0.12,
+            ARM_MOVE_DURATION_SECONDS,
+        ),
+    )
+
+
+def fun_pose_yahoo(reachy, step_duration=None, total_seconds=None):
+    """Perform the yahoo fun picture pose (fnps3)."""
+    _fun_picture_pose(
+        reachy,
+        LEFT_PICTURE_YAHOO_POSE,
+        RIGHT_PICTURE_YAHOO_POSE,
+        "yahoo",
+        right_intermediate=RIGHT_PICTURE_YAHOO_INTERMEDIATE_POSE,
+    )
+
+
+FUN_PICTURE_POSES = (
+    ("liberty", fun_pose_liberty),
+    ("dab", fun_pose_dab),
+    ("yahoo", fun_pose_yahoo),
+)
+
+FUN_POSE_DISPLAY_NAMES = {
+    "liberty": "Statue of Liberty",
+    "dab": "dab",
+    "yahoo": "Yahoo",
+}
+
 def open_gripper(arm):
     if arm.gripper is None:
         print("No gripper found.")
         return
 
+    ensure_gripper_on(arm)
     print("Opening gripper...")
     arm.gripper.set_opening(100)
     time.sleep(0.8)
+
+
+def ensure_gripper_on(arm):
+    """Power an arm's gripper before sending an opening command."""
+    if arm.gripper is None:
+        raise RuntimeError("No gripper is available on this arm.")
+
+    if arm.gripper.is_on():
+        return
+
+    print("Gripper is off. Powering on the arm and gripper...")
+    arm.turn_on()
+    time.sleep(0.5)
+
+    if not arm.gripper.is_on():
+        raise RuntimeError("Gripper did not power on.")
 
 
 def close_gripper_for_ball(arm, opening=25):
@@ -134,6 +474,7 @@ def close_gripper_for_ball(arm, opening=25):
         print("No gripper found.")
         return
 
+    ensure_gripper_on(arm)
     print(f"Closing gripper to {opening}...")
     arm.gripper.set_opening(opening)
     time.sleep(1.0)
@@ -314,6 +655,78 @@ def speaking_motion(reachy, stop_event=None, style="calm"):
         print("speaking_motion skipped:", e)
 
 
+def reset_right_arm_to_base(reachy):
+    """Return the right arm to the default resting pose."""
+    if reachy is None:
+        return
+
+    if reachy.r_arm is None:
+        print("Right arm not available for reset.")
+        return
+
+    print("\nReturning right arm to default position.")
+    try:
+        move_4x4(reachy.r_arm, BASE_POSE)
+    except Exception as e:
+        print("Right arm reset skipped:", e)
+
+
+def reset_after_action(reachy):
+    """Restore Reachy's dashboard default posture after an action.
+
+    Use the SDK's native default joint targets while preserving the current
+    gripper openings, so the left gripper does not drop the microphone.
+    """
+    if reachy is None:
+        return
+
+    if reachy.l_arm is None or reachy.r_arm is None:
+        print("Both arms are required for the post-action reset.")
+        return
+
+    print("\nReturning Reachy to the dashboard default posture.")
+
+    try:
+        # Cancel any queued action poses before issuing the home posture.
+        reachy.cancel_all_goto()
+
+        left_default = reachy.l_arm.get_default_posture_joints("default")
+        right_default = reachy.r_arm.get_default_posture_joints("default")
+
+        with ThreadPoolExecutor(max_workers=3) as executor:
+            moves = [
+                executor.submit(
+                    reachy.l_arm.goto,
+                    left_default,
+                    duration=ARM_MOVE_DURATION_SECONDS,
+                    wait=True,
+                ),
+                executor.submit(
+                    reachy.r_arm.goto,
+                    right_default,
+                    duration=ARM_MOVE_DURATION_SECONDS,
+                    wait=True,
+                ),
+            ]
+
+            if reachy.head is not None:
+                moves.append(
+                    executor.submit(
+                        reachy.head.goto_posture,
+                        duration=ARM_MOVE_DURATION_SECONDS,
+                        wait=True,
+                        wait_for_goto_end=True,
+                    )
+                )
+
+            for move in moves:
+                move.result()
+
+        print("Reachy is back in the dashboard default posture.")
+    except Exception as e:
+        print("Dashboard default-posture reset skipped:", e)
+
+
 def return_to_normal_state(reachy, arm=None):
     if reachy is None:
         return
@@ -354,40 +767,39 @@ def grasp_handover_release(reachy, label="grasp"):
 
     print()
     print(f"Starting {label} sequence.")
-    print("Make sure the ball is in the same position as the recorded poses.")
+    print("Make sure the cup is in the same position as the recorded poses.")
 
     wait_if_safety("Press Enter to start movement... ")
 
     open_gripper(arm)
 
-    move_4x4(arm, BASE_POSE, duration=4.0)
-    move_4x4(arm, PRE_GRASP_POSE, duration=4.0)
+    move_4x4(arm, CUP_START_POSE, duration=ARM_MOVE_DURATION_SECONDS)
+    move_4x4(arm, CUP_APPROACH_POSE, duration=ARM_MOVE_DURATION_SECONDS)
 
-    wait_if_safety("Check PRE_GRASP_POSE. Press Enter to continue to GRASP_POSE... ")
+    wait_if_safety("Check CUP_APPROACH_POSE. Press Enter to continue to CUP_GRASP_POSE... ")
 
-    move_4x4(arm, GRASP_POSE, duration=3.0)
+    move_4x4(arm, CUP_GRASP_POSE, duration=ARM_MOVE_DURATION_SECONDS)
 
-    wait_if_safety("Check gripper around ball. Press Enter to close gripper... ")
+    wait_if_safety("Check gripper around cup. Press Enter to close gripper... ")
 
     close_gripper_for_ball(arm, opening=25)
 
     wait_if_safety("Press Enter to lift... ")
 
-    move_4x4(arm, LIFT_POSE, duration=3.0)
-    move_4x4(arm, HANDOVER_POSE, duration=4.0)
+    move_4x4(arm, CUP_LIFT_POSE, duration=ARM_MOVE_DURATION_SECONDS)
+    move_4x4(arm, CUP_HANDOVER_POSE, duration=ARM_MOVE_DURATION_SECONDS)
 
-    wait_if_safety("Press Enter to open gripper and release ball... ")
+    wait_if_safety("Press Enter to open gripper and release cup... ")
 
-    #open_gripper(arm)
     time.sleep(5.0)
 
-    wait_if_safety("Cup released. Press Enter to return Reachy to normal state... ")
+    move_4x4(arm, CUP_LIFT_POSE, duration=ARM_MOVE_DURATION_SECONDS)
+    move_4x4(arm, CUP_GRASP_POSE, duration=ARM_MOVE_DURATION_SECONDS)
+    open_gripper(arm)
+    move_4x4(arm, CUP_APPROACH_POSE, duration=ARM_MOVE_DURATION_SECONDS)
+    move_4x4(arm, CUP_START_POSE, duration=ARM_MOVE_DURATION_SECONDS)
 
-    move_4x4(arm, GRASP_POSE, duration=4.0)
-
-    #move_4x4(arm, BASE_POSE, duration=4.0)
-
-    #return_to_normal_state(reachy, arm)
+    reset_after_action(reachy)
 
     print(f"{label} sequence complete.")
 
@@ -406,12 +818,14 @@ def grasp_mic_init(reachy, label="mic grab"):
         print("Left gripper not available.")
         return
 
-    #open_gripper(arm)
-    move_4x4(arm, MIC_POSE, duration=4.0)
-
-    close_gripper_for_ball(arm, opening=5)
-
-    print(f"{label} Mic grabbed.")
+    try:
+        # open_gripper(arm)
+        move_4x4(arm, MIC_POSE, duration=4.0)
+        close_gripper_for_ball(arm, opening=5)
+        print(f"{label} Mic grabbed.")
+    except RuntimeError as exc:
+        # A gripper fault should not terminate the complete voice demo.
+        print(f"{label} skipped: {exc}")
 
 def mic_forward(reachy, label="fwd"):
     if reachy is None:

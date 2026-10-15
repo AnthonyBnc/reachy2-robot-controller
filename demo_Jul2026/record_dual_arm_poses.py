@@ -79,12 +79,12 @@ def main() -> None:
     )
 
     right_poses = [
-        capture_arm_pose(reachy, "right", 1),
-        capture_arm_pose(reachy, "right", 2),
+        capture_arm_pose(reachy, "right", number)
+        for number in range(1, 3)
     ]
     left_poses = [
-        capture_arm_pose(reachy, "left", 1),
-        capture_arm_pose(reachy, "left", 2),
+        capture_arm_pose(reachy, "left", number)
+        for number in range(1, 3)
     ]
     pose_pairs = list(zip(left_poses, right_poses))
 
@@ -103,6 +103,10 @@ def main() -> None:
         "Press Enter to power the motors and replay... "
     )
     reachy.turn_on()
+    # Explicit Arm.turn_on() is required by Reachy SDK 1.0.7 to power each
+    # separate gripper after recording in compliant mode.
+    reachy.l_arm.turn_on()
+    reachy.r_arm.turn_on()
 
     for number, (left_pose, right_pose) in enumerate(pose_pairs, start=1):
         replay_pair(reachy, left_pose, right_pose, number)
