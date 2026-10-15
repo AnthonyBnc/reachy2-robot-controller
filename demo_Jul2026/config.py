@@ -6,7 +6,7 @@ import os
 # Reachy
 # =========================================================
 
-ROBOT_HOST = "192.168.0.120"  # Change if Reachy's IP changes
+ROBOT_HOST = "10.116.19.196"  # Change if Reachy's IP changes
 USE_REACHY = True
 
 # Keep this True for first testing.
