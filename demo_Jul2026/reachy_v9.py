@@ -45,6 +45,10 @@ from workflows.grasp_workflow import run_grasp_demo
 #from workflows.conversation_workflow import run_conversation
 #from workflows.goodbye_workflow import run_goodbye
 
+from pathlib import Path
+from dotenv import load_dotenv
+
+load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 reachy = connect_reachy()
 #run_grasp_demo(reachy,label="first grasp demonstration",)
